@@ -15,6 +15,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const variables = ['A', 'B', 'C', 'D', 'E'];
     
+    function populateVariableSelect() {
+        varCountSelect.innerHTML = '';
+        for (let i = 2; i <= 5; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+            option.textContent = i;
+            varCountSelect.appendChild(option);
+        }
+    }
+
     function generateTruthTable() {
         const varCount = parseInt(varCountSelect.value);
         const numRows = Math.pow(2, varCount);
@@ -51,13 +61,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let kMapHTML = '';
         kMapTable.innerHTML = '';
 
-        const grayCode = (n) => {
-            const result = [];
-            for (let i = 0; i < (1 << n); i++) {
-                result.push((i ^ (i >> 1)).toString(2).padStart(n, '0'));
-            }
-            return result;
-        };
+        if (varCount === 5) {
+            kMapTable.innerHTML = `<p class="text-center text-danger mt-4">K-map for 5 variables is currently not supported.</p>`;
+            return;
+        }
 
         if (varCount === 2) {
             kMapHTML = `
@@ -134,57 +141,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     `).join('')}
                 </tbody>
             `;
-        } else if (varCount === 5) {
-            const colHeaders = ['00', '01', '11', '10'];
-            const rowHeaders = ['00', '01', '11', '10'];
-            const indices = [
-                0, 1, 3, 2, 4, 5, 7, 6, 12, 13, 15, 14, 8, 9, 11, 10,
-                16, 17, 19, 18, 20, 21, 23, 22, 28, 29, 31, 30, 24, 25, 27, 26
-            ];
-            kMapHTML = `
-                <h5 class="text-center">${variables[4]} = 0</h5>
-                <table class="table table-bordered text-center">
-                    <thead>
-                        <tr>
-                            <th colspan="2" rowspan="2"></th>
-                            <th colspan="4">${variables[2]}${variables[3]}</th>
-                        </tr>
-                        <tr>
-                            ${colHeaders.map(h => `<th>${h}</th>`).join('')}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rowHeaders.map((row, rIdx) => `
-                            <tr>
-                                ${rIdx === 0 ? `<th rowspan="4">${variables[0]}${variables[1]}</th>` : ''}
-                                <th>${row}</th>
-                                ${indices.slice(rIdx * 4, (rIdx + 1) * 4).map(i => `<td data-index="${i}"></td>`).join('')}
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-                <h5 class="text-center">${variables[4]} = 1</h5>
-                <table class="table table-bordered text-center">
-                    <thead>
-                        <tr>
-                            <th colspan="2" rowspan="2"></th>
-                            <th colspan="4">${variables[2]}${variables[3]}</th>
-                        </tr>
-                        <tr>
-                            ${colHeaders.map(h => `<th>${h}</th>`).join('')}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rowHeaders.map((row, rIdx) => `
-                            <tr>
-                                ${rIdx === 0 ? `<th rowspan="4">${variables[0]}${variables[1]}</th>` : ''}
-                                <th>${row}</th>
-                                ${indices.slice((rIdx + 4) * 4, (rIdx + 5) * 4).map(i => `<td data-index="${i}"></td>`).join('')}
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
         }
         
         kMapTable.innerHTML = kMapHTML;
@@ -252,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             termA.used = true;
                             termB.used = true;
                             const newBinary = termA.binary.substring(0, diffIndex) + '-' + termA.binary.substring(diffIndex + 1);
-                            const newMinterms = [...termA.minterms, ...termB.minterms];
+                            const newMinterms = [...termA.minterms, ...termB.minterms].sort((a,b) => a-b);
                             const newOnes = countOnes(newBinary);
 
                             if (!newGroups.has(newOnes)) newGroups.set(newOnes, []);
@@ -280,10 +236,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         groups.forEach(group => {
-            primeImplicants.push(...group);
+            group.forEach(term => {
+                primeImplicants.push(term);
+            });
         });
 
-        // Unique prime implicants
         const uniquePrimes = [];
         const seen = new Set();
         primeImplicants.forEach(pi => {
@@ -294,52 +251,54 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         primeImplicants = uniquePrimes;
 
-        // Simplified Petrick's Method to select essential primes
+        const finalPrimes = [];
         const mintermSet = new Set(minterms);
-        const essentialPrimes = new Set();
-        let coveredMinterms = new Set();
+        const coveredMinterms = new Set();
 
-        mintermSet.forEach(m => {
-            const coveringPrimes = primeImplicants.filter(pi => pi.minterms.includes(m));
-            if (coveringPrimes.length === 1) {
-                const prime = coveringPrimes[0];
-                essentialPrimes.add(prime);
-                prime.minterms.forEach(coveredMinterms.add, coveredMinterms);
-            }
+        const primeChart = {};
+        minterms.forEach(m => primeChart[m] = []);
+
+        primeImplicants.forEach(pi => {
+            pi.minterms.forEach(m => {
+                if (mintermSet.has(m)) {
+                    primeChart[m].push(pi);
+                }
+            });
         });
 
-        let uncoveredMinterms = [...mintermSet].filter(m => !coveredMinterms.has(m));
-        
-        if (uncoveredMinterms.length > 0) {
-            let remainingPrimes = primeImplicants.filter(pi => !essentialPrimes.has(pi));
-            while (uncoveredMinterms.length > 0 && remainingPrimes.length > 0) {
-                let bestPrime = null;
-                let maxCover = -1;
-
-                remainingPrimes.forEach(pi => {
-                    const currentCover = pi.minterms.filter(m => uncoveredMinterms.includes(m)).length;
-                    if (currentCover > maxCover) {
-                        maxCover = currentCover;
-                        bestPrime = pi;
-                    }
-                });
-
-                if (bestPrime) {
-                    essentialPrimes.add(bestPrime);
-                    bestPrime.minterms.forEach(m => {
-                        const index = uncoveredMinterms.indexOf(m);
-                        if (index !== -1) {
-                            uncoveredMinterms.splice(index, 1);
-                        }
-                    });
-                    remainingPrimes = remainingPrimes.filter(pi => pi !== bestPrime);
-                } else {
-                    break;
+        for (const m in primeChart) {
+            if (primeChart[m].length === 1) {
+                const essentialPi = primeChart[m][0];
+                if (!finalPrimes.includes(essentialPi)) {
+                    finalPrimes.push(essentialPi);
+                    essentialPi.minterms.forEach(coveredMinterms.add, coveredMinterms);
                 }
             }
         }
+
+        let uncoveredMinterms = [...mintermSet].filter(m => !coveredMinterms.has(m));
         
-        return Array.from(essentialPrimes);
+        while(uncoveredMinterms.length > 0) {
+            let bestPrime = null;
+            let maxCover = 0;
+            
+            primeImplicants.filter(pi => !finalPrimes.includes(pi)).forEach(pi => {
+                const currentCover = pi.minterms.filter(m => uncoveredMinterms.includes(m)).length;
+                if (currentCover > maxCover) {
+                    maxCover = currentCover;
+                    bestPrime = pi;
+                }
+            });
+
+            if (bestPrime) {
+                finalPrimes.push(bestPrime);
+                uncoveredMinterms = uncoveredMinterms.filter(m => !bestPrime.minterms.includes(m));
+            } else {
+                break;
+            }
+        }
+
+        return finalPrimes;
     }
     
     function formatExpression(implicants, varCount) {
@@ -348,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         if (implicants.length === 1 && implicants[0].binary.split('').every(c => c === '-')) {
-             return { plain: "1'b1", verilog: "1'b1", math: '1' };
+             return { plain: "1", verilog: "1'b1", math: '1' };
         }
 
         const terms = implicants.map(implicant => {
@@ -434,7 +393,6 @@ endmodule`;
         const dontCares = outputs.map((val, i) => val === 'X' ? i : -1).filter(i => i !== -1);
         const vars = variables.slice(0, varCount);
         
-        // Handle all '0's and all '1's cases upfront
         const allZeros = outputs.every(val => val === '0' || val === 'X');
         const allOnes = outputs.every(val => val === '1' || val === 'X');
 
@@ -489,5 +447,9 @@ endmodule`;
         URL.revokeObjectURL(url);
     });
 
+    // Initial setup
+    populateVariableSelect();
     generateTruthTable();
 });
+
+
